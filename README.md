@@ -4,6 +4,16 @@ This is my first Neovim plugin that i ever made
 
 It's super cool
 
+# Installation
+
+`lazy`
+
+```lua
+return {
+    "askerdev/present.nvim",
+}
+```
+
 # Description
 
 This plugin is made to make beautiful presentations from markdown and show them right in Neovim
