@@ -9,6 +9,7 @@ describe("present.parse_slides", function()
 				{
 					title = "",
 					body = {},
+					blocks = {},
 				},
 			},
 		}, parse({}))
@@ -20,13 +21,27 @@ describe("present.parse_slides", function()
 				slides = {
 					{
 						title = "# This is the first slide",
-						body = { "This is the body" },
+						body = {
+							"This is the body",
+							"```lua",
+							"print('Hello, world!')",
+							"```",
+						},
+						blocks = {
+							{
+								language = "lua",
+								body = "print('Hello, world!')",
+							},
+						},
 					},
 				},
 			},
 			parse({
 				"# This is the first slide",
 				"This is the body",
+				"```lua",
+				"print('Hello, world!')",
+				"```",
 			})
 		)
 	end)
