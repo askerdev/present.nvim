@@ -12,11 +12,39 @@ local function create_floating_window(config, enter)
 	return { buf = buf, win = win }
 end
 
-M.setup = function() end
+M.create_system_executor = function(program)
+	return function(block)
+		local file = vim.fn.tempname()
+		vim.fn.writefile(vim.fn.split(block.body, "\n"), file)
+		local result = vim.system({ program, file }, { text = true }):wait()
+		return vim.split(result.stdout, "\n")
+	end
+end
+
+local options = {
+	executors = {
+		javascript = M.create_system_executor("node"),
+		python = M.create_system_executor("python3"),
+	},
+}
+
+M.setup = function(opts)
+	opts = opts or {}
+	opts.executors = opts.executors or {}
+	opts.executors.javascript = opts.executors.javascript or M.create_system_executor("node")
+	opts.executors.python = opts.executors.python or M.create_system_executor("python3")
+
+	options = opts
+end
+
+---@class present.Block
+---@field language string
+---@field body string
 
 ---@class present.Slide
 ---@field title string
 ---@field body string
+---@field blocks present.Block[]
 
 ---@class present.Slides
 ---@field slides present.Slide[]: The slides of the file
@@ -25,10 +53,12 @@ M.setup = function() end
 ---@param lines string[]: Lines in the buffer
 ---@return present.Slides
 local parse_slides = function(lines)
+	---@type present.Slides
 	local slides = { slides = {} }
 	local current_slide = {
 		title = "",
 		body = {},
+		blocks = {},
 	}
 
 	local separator = "^#"
@@ -42,6 +72,7 @@ local parse_slides = function(lines)
 			current_slide = {
 				title = line,
 				body = {},
+				blocks = {},
 			}
 		else
 			table.insert(current_slide.body, line)
@@ -49,6 +80,34 @@ local parse_slides = function(lines)
 	end
 
 	table.insert(slides.slides, current_slide)
+
+	for _, slide in ipairs(slides.slides) do
+		local block = {
+			language = nil,
+			body = "",
+		}
+		local inside_block = false
+		for _, line in ipairs(slide.body) do
+			if vim.startswith(line, "```") then
+				if not inside_block then
+					inside_block = true
+					block.language = string.sub(line, 4)
+				else
+					inside_block = false
+					block.body = vim.trim(block.body)
+					table.insert(slide.blocks, block)
+					block = {
+						language = nil,
+						body = "",
+					}
+				end
+			else
+				if inside_block then
+					block.body = block.body .. line .. "\n"
+				end
+			end
+		end
+	end
 
 	return slides
 end
@@ -165,6 +224,46 @@ M.start_presentation = function(opts)
 
 	present_keymap("n", "q", function()
 		vim.api.nvim_win_close(state.floats.body.win, true)
+	end)
+
+	present_keymap("n", "X", function()
+		local slide = state.parsed.slides[state.current_slide]
+		if #slide.blocks < 1 then
+			return
+		end
+
+		local block = slide.blocks[1]
+		print(vim.inspect(block))
+		local output = { "", "# Code", "", "```" .. block.language }
+		vim.list_extend(output, vim.fn.split(block.body, "\n"))
+		vim.list_extend(output, { "```", "", "# Output", "```", "" })
+		local result = options.executors[block.language](block)
+		vim.list_extend(output, result)
+		table.insert(output, "```")
+
+		local buf = vim.api.nvim_create_buf(false, true)
+		vim.bo[buf].filetype = "markdown"
+		vim.api.nvim_buf_set_lines(buf, 1, -1, false, output)
+
+		local temp_width = math.floor(vim.o.columns * 0.8)
+		local temp_height = math.floor(vim.o.lines * 0.8)
+
+		local win = vim.api.nvim_open_win(buf, true, {
+			relative = "editor",
+			style = "minimal",
+			width = temp_width,
+			height = temp_height,
+			col = math.floor((vim.o.columns - temp_width) / 2),
+			row = math.floor((vim.o.lines - temp_height) / 2),
+			border = "rounded",
+			noautocmd = true,
+		})
+
+		vim.keymap.set("n", "q", function()
+			vim.api.nvim_win_close(win, true)
+		end, {
+			buffer = buf,
+		})
 	end)
 
 	local restore = {
